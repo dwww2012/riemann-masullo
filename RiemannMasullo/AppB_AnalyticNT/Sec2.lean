@@ -322,7 +322,24 @@ before the exponential change of variables gives the ordinary iterated derivativ
 theorem iterate_eulerDeriv_comp_exp (φ : ℝ → ℂ) (hφ : ContDiffOn ℝ ∞ φ (Ioi 0))
     (N : ℕ) (hN : 1 ≤ N) (x : ℝ) :
     ((fun g : ℝ → ℂ ↦ fun t ↦ (t : ℂ) * deriv g t)^[N]) φ (Real.exp x) =
-      iteratedDeriv N (fun u : ℝ ↦ φ (Real.exp u)) x := by sorry
+      iteratedDeriv N (fun u : ℝ ↦ φ (Real.exp u)) x := by
+  clear hN
+  induction N generalizing φ x with
+  | zero => simp
+  | succ N ih =>
+    have hderiv : ContDiffOn ℝ ∞ (fun t : ℝ ↦ (t : ℂ) * deriv φ t) (Ioi 0) :=
+      (Complex.ofRealCLM.contDiff.contDiffOn).mul
+        ((hφ.derivWithin (uniqueDiffOn_Ioi 0) le_rfl).congr
+          fun t ht ↦ (derivWithin_of_isOpen isOpen_Ioi ht).symm)
+    have hchain : (fun u : ℝ ↦ ((Real.exp u : ℝ) : ℂ) * deriv φ (Real.exp u)) =
+        deriv (fun u : ℝ ↦ φ (Real.exp u)) := by
+      funext u
+      have hφu : HasDerivAt φ (deriv φ (Real.exp u)) (Real.exp u) :=
+        ((hφ.differentiableOn (by simp)).differentiableAt
+          (isOpen_Ioi.mem_nhds (Real.exp_pos u))).hasDerivAt
+      have h := HasDerivAt.scomp u hφu (Real.hasDerivAt_exp u)
+      exact (Complex.real_smul.symm.trans h.deriv.symm)
+    rw [Function.iterate_succ_apply, ih _ hderiv, hchain, ← iteratedDeriv_succ']
 
 -- TODO(paper-gap): Theorem B.2.1.7(1)(c) places a uniform bound on a strip
 -- containing the prescribed poles. Even on the punctured strip it rules out
