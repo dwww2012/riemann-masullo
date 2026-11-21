@@ -1,6 +1,7 @@
 module
 
 public import RiemannMasullo.AppB_AnalyticNT.Sec2
+import Mathlib.Analysis.Complex.CauchyIntegral
 public import Mathlib.MeasureTheory.Integral.CircleIntegral
 
 /-!
@@ -289,7 +290,19 @@ def complexResidue (f : ℂ → ℂ) (ρ : ℂ) : ℂ :=
 `z - ρ` gives residue equal to the numerator at `ρ`.
 Deviation: Sanity check for the residue normalization at a simple pole. -/
 theorem complexResidue_div_sub {g : ℂ → ℂ} {ρ : ℂ} (hg : AnalyticAt ℂ g ρ) :
-    complexResidue (fun z ↦ g z / (z - ρ)) ρ = g ρ := by sorry
+    complexResidue (fun z ↦ g z / (z - ρ)) ρ = g ρ := by
+  obtain ⟨R, hR, hgR⟩ := hg.exists_ball_analyticOnNhd
+  refine (tendsto_const_nhds.congr' ?_).limUnder_eq
+  filter_upwards [Ioo_mem_nhdsGT hR] with r hr
+  have hsub : Metric.closedBall ρ r ⊆ Metric.ball ρ R := Metric.closedBall_subset_ball hr.2
+  have hint : circleIntegral (fun z ↦ g z / (z - ρ)) ρ r = twoPiI * g ρ := by
+    have h := Complex.circleIntegral_sub_inv_smul_of_differentiable_on_off_countable
+      (f := g) Set.countable_empty (Metric.mem_ball_self hr.1)
+      (fun z hz ↦ (hgR z (hsub hz)).continuousAt.continuousWithinAt)
+      (fun z hz ↦ (hgR z (hsub (Metric.ball_subset_closedBall hz.1))).differentiableAt)
+    simpa [div_eq_inv_mul] using h
+  rw [hint, mul_div_cancel_left₀]
+  simp [Real.pi_ne_zero, Complex.I_ne_zero]
 
 set_option quotPrecheck false in
 local notation "rectanglePoles" =>
