@@ -6,3 +6,6 @@
 
 # Agent scratch space (see AGENTS.md)
 .agent/
+
+# Python bytecode (scripts/ci)
+__pycache__/

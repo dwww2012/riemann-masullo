@@ -1,0 +1,46 @@
+name: CI self-test
+
+# Runs when a pull request changes the workflows or the scripts: the unit tests of the checks
+# (scripts/ci/selftest.sh), then the pull request check itself, replayed on pull requests that
+# were merged by hand, with the sandbox and toolchain set up as in `PR check`.
+
+on:
+  pull_request:
+    paths: [".github/workflows/**", "scripts/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Unit tests
+        run: scripts/ci/selftest.sh
+      - name: Set up the sandbox
+        run: |
+          command -v bwrap >/dev/null || { sudo apt-get update -qq; sudo apt-get install -y -qq bubblewrap; }
+          sudo sysctl -qw kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --unshare-all --ro-bind / / true
+      - name: Install Lean
+        run: |
+          curl -sSfL --retry 3 https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >>"$GITHUB_PATH"
+          "$HOME/.elan/bin/lake" --version
+      - name: Fetch the dependencies and Mathlib's build
+        run: |
+          lake exe cache get || { sleep 20; lake exe cache get; }
+          git status --short   # the checks expect Lake to leave tracked files alone
+      - name: Replay merged pull requests
+        run: scripts/ci/selftest.sh --replay

@@ -72,6 +72,23 @@ you `integrator`. It also runs the issue sync after proof merges from its own wo
 You keep statement pull requests and seeding, and run the sync after you merge statements.
 The [progress tracker](progress-tracker.md) builds and publishes the progress map.
 
+**What CI does without either of you.** Every pull request, from anyone, gets a verdict from the
+`PR check` workflow: the `merge`, `read` or `fail` of `scripts/triage_prs.sh`, with the reasons in
+the run's summary. The `Auto-merge` workflow squash-merges the ones that say `merge`, unless they
+are labelled `integrator`, so most finished proofs land by themselves; the rest is the merger's
+queue and yours, as before. The workflows and `scripts/ci/` are your infrastructure:
+- The check decides "only proofs" from the text, using the list of tokens that can begin a
+  command, `scripts/ci/command_keywords.txt`. After changing the toolchain or the Mathlib pin, or
+  adding a command to the library, run `scripts/ci/keywords.sh --write` and commit the result;
+  until then every check reports `error` and nothing is merged.
+- The check runs `scripts/proof_review.sh` itself, so a rule the merger adds there holds pull
+  requests back in CI at once. `scripts/ci/plain_proof.py` repeats those rules for the workflow
+  that merges; a rule the merger relaxes takes effect in CI only when it is relaxed there too.
+- A change to `.github/` or `scripts/` is never merged automatically, and CI runs
+  `scripts/ci/selftest.sh` on it. What the workflows defend against is written at the top of
+  `scripts/ci/auto_merge.py`; read it before changing either workflow.
+- To stop all automatic merging, `gh workflow disable auto_merge.yml`.
+
 `scripts/pool.sh <count>` keeps that many provers working and merges what `land.sh` accepts,
 without touching this checkout; you still pull, rebuild and run `scripts/issues.py --apply`. An
 issue an agent gave up on is labelled `stuck` and is not retried until you remove the label:

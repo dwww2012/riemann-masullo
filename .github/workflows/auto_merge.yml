@@ -1,0 +1,55 @@
+name: Auto-merge
+
+# Squash-merges the pull requests that `PR check` judged `merge`. scripts/ci/auto_merge.py has
+# the rules and the reasoning; in short, it trusts the check's artifact for nothing it can work
+# out itself from commit ids and the GitHub API.
+#
+# This is the only workflow with a token that can write. It runs main's copy of this file and
+# main's scripts, whatever started it, and must never check out, build or run anything from a
+# pull request. To stop it: Actions > Auto-merge > Disable workflow. To keep it off one pull
+# request, give that pull request the label `integrator`.
+#
+# The schedule picks up anything a missed event left behind, and runs again the checks that
+# could not be carried out.
+
+on:
+  workflow_run:
+    workflows: ["PR check"]
+    types: [completed]
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+# One at a time, so that every merge is judged against a main that includes the one before. A
+# run that is waiting is replaced by a newer one, which is fine: each run handles everything.
+concurrency:
+  group: auto-merge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      github.repository == 'mccorvie/riemann-masullo' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write        # merge
+      pull-requests: write   # merge
+      actions: write         # run a check again, drop a used verdict, start Main state
+      statuses: write        # say on the commit why something was not merged
+    steps:
+      - name: Check out main's scripts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: Merge what is ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RETRY: ${{ github.event_name != 'workflow_run' && '--retry-errors' || '' }}
+        run: python3 scripts/ci/auto_merge.py ${RETRY:+"$RETRY"}

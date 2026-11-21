@@ -1,0 +1,124 @@
+name: PR check
+
+# Builds every pull request on top of main and says what should happen to it:
+#
+#   merge   finished proofs and nothing else; the Auto-merge workflow merges it
+#   read    it passes, but the integrator reads it first (statements, splits, new files or
+#           definitions, anything outside the library)
+#   fail    it does not merge into main, build, pass the lint, or keep existing statements
+#
+# scripts/ci/verdict.py has the exact rules; they are those of scripts/triage_prs.sh. The verdict
+# is shown in the run's summary and uploaded as the artifact `verdict-<verdict>`.
+#
+# The pull request is only ever data here. The checker (scripts/, lakefile, lean-toolchain,
+# lake-manifest.json) is main's: main is what gets checked out, the pull request's commit is
+# fetched next to it, and only its Lean files under RiemannMasullo/ are merged in, after
+# verdict.py has refused anything else. They are built in a sandbox with no network.
+#
+# This workflow runs with a read-only token, on pull requests from forks too. A pull request can
+# change its own copy of this file, so nothing here is trusted by Auto-merge: see
+# scripts/ci/auto_merge.py. Keep `branches: [main]`: a pull request against another branch
+# would run that branch's copy of this file.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  actions: read   # to download what the Main state workflow saved
+
+# Per commit, not per pull request: Auto-merge runs a check again when main has moved, and that
+# must not cancel the check of a newer commit pushed in the meantime.
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  verdict:
+    name: Verdict
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: tools
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch the pull request's commit and make the work tree
+        run: |
+          [[ "$PR" =~ ^[0-9]+$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          cd tools
+          if [ ! -f scripts/ci/verdict.py ]; then
+            echo "::error::main has no checker (scripts/ci/) yet, so nothing can be checked. Only the pull request that adds it should see this."
+            exit 1
+          fi
+          git fetch --no-tags origin "+refs/pull/$PR/head:refs/remotes/origin/pr"
+          if [ "$(git rev-parse refs/remotes/origin/pr)" != "$HEAD_SHA" ]; then
+            echo "::error::The pull request was pushed to after this run started; a newer run checks it."
+            exit 1
+          fi
+          base=$(git rev-parse HEAD)
+          git worktree add --detach ../work "$base"
+          echo "BASE_SHA=$base" >>"$GITHUB_ENV"
+
+      - name: Set up the sandbox
+        run: |
+          command -v bwrap >/dev/null || { sudo apt-get update -qq; sudo apt-get install -y -qq bubblewrap; }
+          # Ubuntu 24.04 lets only programs with an AppArmor profile make user namespaces.
+          sudo sysctl -qw kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --unshare-all --ro-bind / / true
+
+      - name: Install Lean
+        run: |
+          curl -sSfL --retry 3 https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >>"$GITHUB_PATH"
+          cd work && "$HOME/.elan/bin/lake" --version
+
+      - name: Fetch the dependencies and Mathlib's build
+        working-directory: work
+        run: lake exe cache get || { sleep 20; lake exe cache get; }
+
+      - name: Start from main's saved build, if there is one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPO_ID: ${{ github.repository_id }}
+        run: python3 tools/scripts/ci/base_state.py --work work --base "$BASE_SHA" --out base-state || echo "could not fetch it; main will be built here"
+
+      - name: Check the pull request
+        id: check
+        run: |
+          saved=()
+          if [ -s "base-state/signatures-$BASE_SHA.txt" ]; then saved=(--base-signatures "base-state/signatures-$BASE_SHA.txt"); fi
+          python3 tools/scripts/ci/verdict.py --work work --base "$BASE_SHA" --head "$HEAD_SHA" --pr "$PR" \
+            --out verdict "${saved[@]}" || true
+          verdict=$(python3 -c 'import json; print(json.load(open("verdict/verdict.json"))["verdict"])')
+          case $verdict in merge|read|fail|error) ;; *) verdict=error ;; esac
+          echo "verdict=$verdict" >>"$GITHUB_OUTPUT"
+          cat verdict/summary.md >>"$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Verdict::$verdict"
+
+      - name: Publish the verdict
+        if: steps.check.outputs.verdict != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-${{ steps.check.outputs.verdict }}
+          path: verdict/verdict.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 3
+
+      - name: Fail the check unless the verdict is merge or read
+        if: steps.check.outputs.verdict != 'merge' && steps.check.outputs.verdict != 'read'
+        run: |
+          echo "See the summary of this run for the reasons."
+          exit 1

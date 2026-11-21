@@ -14,8 +14,10 @@ of them ask for one thing: prove a single Lean declaration whose statement is al
    into smaller lemmas that are each left as `sorry`; or you show the statement is **wrong** and
    say so on the issue. The rules are in [`AGENTS.md`](AGENTS.md); the main one is that a proof
    never changes a statement.
-5. Open a pull request against `main` with `Closes #<issue>` in the description. CI lints and
-   builds it, and the integrator reviews and merges.
+5. Open a pull request against `main` with `Closes #<issue>` in the description. CI builds it on
+   top of `main` and reports a verdict in the `PR check` run. A finished proof that changes
+   nothing else is merged automatically; anything else (a split, a new definition or file,
+   statements) waits for the integrator; and if the check fails, its summary says why.
 
 ## With a coding agent
 
