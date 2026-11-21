@@ -2,6 +2,7 @@
 # Print the signature of every declaration in the library (see scripts/Signatures.lean).
 #
 #   scripts/signatures.sh > new.txt
+#   scripts/signatures.sh --all > new.txt               # private definitions too (see Signatures.lean)
 #   scripts/signatures.sh --compare old.txt new.txt     # lists declarations whose statement changed
 #
 # The comparison ignores declarations that exist in only one file: adding a lemma or finishing
@@ -30,6 +31,7 @@ if [ "${1:-}" = --sorry-in-defs ]; then
   [ -z "$bad" ]
   exit
 fi
+all=; [ "${1:-}" = --all ] && all=--all
 lake build RiemannMasullo >/dev/null
 modules=$(find RiemannMasullo -name '*.lean' | sort | sed 's#/#.#g; s#\.lean$##')
-lake env lean --run scripts/Signatures.lean $modules
+lake env lean --run scripts/Signatures.lean $all $modules
