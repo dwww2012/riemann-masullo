@@ -33,7 +33,8 @@ def IsSobolevWeight [Mul A] [TopologicalSpace A] (w : A → ℝ≥0) : Prop :=
 /-- Paper: Definition 9.1.1.1, p. 396. Every constant nonnegative weight is a Sobolev weight.
 Deviation: Sanity check on the weight condition. -/
 theorem isSobolevWeight_const [Mul A] [TopologicalSpace A] (c : ℝ≥0) :
-    IsSobolevWeight (fun _ : A ↦ c) := by sorry
+    IsSobolevWeight (fun _ : A ↦ c) :=
+  ⟨continuous_const, 1, one_pos, fun _ _ ↦ by rw [one_mul]; exact le_self_add⟩
 
 /-- Paper: Definition 9.1.1.1, p. 396. The measure for degree s has density
 `(1 + w²)^(s/2)` with respect to the measure on the group carrying the weight. -/
